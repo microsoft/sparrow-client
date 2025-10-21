@@ -3,7 +3,7 @@ requests==2.32.3
 urllib3==2.5.0
 idna==3.7
 charset-normalizer==3.3.2
-certifi==2024.2.2
+certifi==2024.7.4
 schedule==1.2.2
 psutil==6.0.0
 filelock==3.12.0
