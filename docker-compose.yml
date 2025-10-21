@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  sparrow:
+    build:
+      context: ./sparrow
+    container_name: sparrow_service
+    env_file:
+      - ./sparrow.env
+    ports:
+      - "25:25" # SMTP server port
+    volumes:
+      - ./sparrow/config:/app/config
+      - ./sparrow/images:/app/images
+      - ./sparrow/static:/app/static
+      - ./sparrow/recordings:/app/recordings
+      - ./sparrow/logs:/app/logs
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
+      - /etc/unique_id:/host/etc/unique_id:ro
+      - ./Models/tritonserver/model_repository:/home/sparrow/Desktop/system/Models/tritonserver/model_repository
+    networks:
+      - sparrow_network
+    privileged: true
+    restart: unless-stopped
+
+  starlink-tools:
+    build:
+      context: ./starlink
+      dockerfile: Dockerfile.starlink
+    container_name: starlink_tools_container
+    env_file:
+      - ./starlink.env
+    volumes:
+      - ./starlink/config:/app/config
+      - ./starlink/logs:/app/logs
+      - /sys:/host/sys:ro
+      - /proc:/host/proc:ro
+      - /etc/unique_id:/host/etc/unique_id:ro
+    networks:
+      - sparrow_network
+    privileged: true
+    restart: unless-stopped
+
+  triton:
+    image: nvcr.io/nvidia/tritonserver:24.06-py3-igpu
+    container_name: triton_server
+    runtime: nvidia
+    environment:
+      - OMP_NUM_THREADS=2
+    ports:
+      - "8000:8000" # HTTP Inference API
+      - "8001:8001" # gRPC Inference API
+      - "8002:8002" # Metrics API
+    volumes:
+      - ./Models/tritonserver/model_repository:/models
+    command: tritonserver --model-repository=/models --model-control-mode=explicit --strict-readiness=false
+    networks:
+      - sparrow_network
+    restart: unless-stopped
+
+networks:
+  sparrow_network:
+    driver: bridge

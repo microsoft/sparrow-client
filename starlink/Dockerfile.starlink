@@ -1,0 +1,27 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y supervisor && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy requirments
+COPY requirements.txt /tmp/requirements.txt
+
+# Handle arch-specific grpc wheels
+RUN true && \
+    ARCH="$(uname -m)"; \
+    if [ "$ARCH" = "armv7l" ]; then \
+        NOBIN_OPT="--no-binary=grpcio"; \
+    else \
+        NOBIN_OPT=""; \
+    fi; \
+    pip install --no-cache-dir $NOBIN_OPT -r /tmp/requirements.txt
+
+# Copy app
+COPY starlink_sleep_schedule.py /app/
+COPY starlink_metrics_logger.py /app/
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]

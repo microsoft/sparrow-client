@@ -1,0 +1,8 @@
+grpcio==1.62.2
+protobuf==4.25.3
+requests==2.31.0
+Jetson.GPIO
+pyserial==3.5
+filelock==3.15.4
+smbus2==0.4.1
+starlink-grpc-core==1.2.3
