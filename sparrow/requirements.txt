@@ -14,8 +14,8 @@ Pillow==10.4.0
 numpy==1.26.4
 pandas==1.4.4
 torch==2.8.0
-torchvision==0.19.0
-torchaudio==2.4.0
+torchvision==0.23.0
+torchaudio==2.8.0
 tritonclient[http]==2.26.0
 protobuf==4.25.3
 soundfile==0.12.1
