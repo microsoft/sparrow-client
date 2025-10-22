@@ -5,25 +5,25 @@ Solar-powered and equipped with advanced sensors, it collects biodiversity dataâ
 
 ## Key Features
 
-1. **Autonomous operation**  
+1. **Autonomous operation**
    Solar-powered for long-term, off-grid deployment (power scheduling and management included).
 
-2. **Sensing**  
+2. **Sensing**
    Camera traps, acoustic monitoring, and environmental sensors.
 
-3. **On-device AI**  
+3. **On-device AI**
    PyTorch models on low-energy edge GPUs (Jetson Orin Nano) for real-time detection and species classification.
 
-4. **Global connectivity**  
+4. **Global connectivity**
    Sends data via low-Earth satellites to a remote endpoint (default SPARROW dashboard).
 
-5. **Resilience**  
+5. **Resilience**
    Local backlogs when offline; safe upload once connectivity returns.
 
 ---
 
-This repository contains the **SPARROW client**:  
-Data collection, on-device inference, power management, telemetry, and secure transmission.  
+This repository contains the **SPARROW client**:
+Data collection, on-device inference, power management, telemetry, and secure transmission.
 All services run in **Docker** and are orchestrated with **Docker Compose**.
 
 ---
@@ -34,7 +34,7 @@ All services run in **Docker** and are orchestrated with **Docker Compose**.
 
 The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, seeds the DS3231 RTC, configures Wi-Fi hotspot, and launches the services.
 
-You will need to obtain an access key from the SPARROW dashboard:  
+You will need to obtain an access key from the SPARROW dashboard:
 [https://dashboard.sparrow-earth.com/](https://dashboard.sparrow-earth.com/)
 
 **Script:** `setup_jetson.sh`
@@ -112,8 +112,8 @@ starlink/config/access_key.txt
 Gets UTC from WorldClock API (fallback: NTP or system UTC) and writes it to the RTC.
 
 ### 10. Wi-Fi Hotspot
-Configures a persistent hotspot via NetworkManager:  
-**SSID:** `CameraTraps`  
+Configures a persistent hotspot via NetworkManager:
+**SSID:** `CameraTraps`
 **Password:** `<to_be_configured>`
 
 ### 11. Docker Build & Launch
@@ -125,8 +125,8 @@ Builds images with BuildKit (no cache), runs `docker-compose up -d`, and tails l
 
 All Python dependencies are inside the containers (no host Python required):
 
-1. `PyTorch`, `torchaudio`, `tritonclient`, `aiosmtpd`, `psutil`, `smbus2`, `pyserial`, etc.  
-2. **NVIDIA Triton Inference Server** (explicit model control mode)  
+1. `PyTorch`, `torchaudio`, `tritonclient`, `aiosmtpd`, `psutil`, `smbus2`, `pyserial`, etc.
+2. **NVIDIA Triton Inference Server** (explicit model control mode)
 3. **Hardware:** I2C, ALSA audio, and USB serial (compose is configured privileged)
 
 ---
@@ -174,3 +174,13 @@ Use of Microsoft trademarks or logos in modified versions of this project must n
 Any use of third-party trademarks or logos are subject to those third-party's policies.
 
 ---
+
+## Data Collection.
+
+The software may collect information about you and your use of the software and send it to Microsoft. Microsoft may use this
+information to provide services and improve our products and services. You may turn off the telemetry as described in the repository.
+There are also some features in the software that may enable you and Microsoft to collect data from users of your applications.
+If you use these features, you must comply with applicable law, including providing appropriate notices to users of your applications
+together with a copy of Microsoftâ€™s privacy statement. Our privacy statement is located at https://go.microsoft.com/fwlink/?LinkID=824704.
+You can learn more about data collection and use in the help documentation and our privacy statement.
+Your use of the software operates as your consent to these practices.
