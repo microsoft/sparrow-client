@@ -17,7 +17,7 @@ torch==2.8.0
 torchvision==0.23.0
 torchaudio==2.8.0
 tritonclient[http]==2.26.0
-protobuf==4.25.3
+protobuf==4.25.8
 soundfile==0.12.1
 audioread==3.0.1
 pooch==1.8.2
