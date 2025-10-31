@@ -1,24 +1,36 @@
+<p align="center">
+  <a href="https://dashboard.sparrow-earth.com/">
+    <img src="https://dashboard.sparrow-earth.com/static/images/SPARROW-Blog-Header_1280px-x-720px_V2.png" 
+         alt="SPARROW - AI for Good Wildlife Monitoring" 
+         width="800">
+  </a>
+</p>
+
+<p align="center">
+  <em>Edge AI for biodiversity.</em>
+</p>
+
 # Project
 
-**SPARROW**, developed by **Microsoft's AI for Good Lab**, is an **AI-powered edge computing solution** designed to monitor and protect wildlife in the most remote regions of the world.
+**SPARROW**, developed by **Microsoft's AI for Good Lab**, is an **AI-powered edge computing solution** designed to monitor and protect wildlife in the most remote regions of the world.  
 Solar-powered and equipped with advanced sensors, it collects biodiversity data—from camera traps, acoustic monitors, and other environmental detectors—that are processed using our most advanced PyTorch-based wildlife AI models on low-energy edge GPUs. The resulting critical information is then transmitted via low-Earth orbit satellites directly to the cloud or on-premise infrastructure, allowing researchers to access fresh, actionable insights in real time, no matter where they are.
 
 ## Key Features
 
 1. **Autonomous operation**  
-   Solar-powered for long-term, off-grid deployment (power scheduling and management included).
+   Intelligent power management with solar charging, battery health monitoring, and dynamic component scheduling enables continuous off-grid operation.
 
 2. **Sensing**  
-   Camera traps, acoustic monitoring, and environmental sensors.
+   Camera traps, acoustic monitoring, and environmental sensors - SPARROW integrates multi-modal sensing to capture images, sounds, and enviromental metrics for comprehensive biodiversity monitoring.
 
 3. **On-device AI**  
-   PyTorch models on low-energy edge GPUs (Jetson Orin Nano) for real-time detection and species classification.
+   Runs optimized PyTorch Wildlife models on low-energy edge GPUs (e.g., Jetson Orin Nano) for real-time image and acoustic detection, species classification, and event recognition.
 
 4. **Global connectivity**  
-   Sends data via low-Earth satellites to a remote endpoint (default SPARROW dashboard).
+   Even in the most remote ecosystems, SPARROW maintains a link to the cloud or on-premise infrastructure through low-Earth-orbit satellites, ensuring that vital conservation data reaches researchers in near real time.
 
 5. **Resilience**  
-   Local backlogs when offline; safe upload once connectivity returns.
+   Designed for extreme field conditions - SPARROW safely records data when offline, automatically synchronizing once connectivity is restored to ensure no loss of information.
 
 ---
 
@@ -30,23 +42,37 @@ All services run in **Docker** and are orchestrated with **Docker Compose**.
 
 # Getting Started
 
-## 1. One-click Jetson Setup (Recommended)
+## 1. Hardware Assembly
 
-The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, seeds the DS3231 RTC, configures Wi-Fi hotspot, and launches the services.
+### Prerequisites
 
-You will need to obtain an access key from the SPARROW dashboard:  
+Before you begin, ensure you have all the necessary hardware listed in the Bill of Materials (BOM):  
+[https://link-to-bom/](https://link-to-bom/)
+
+Full build instructions can be found here:  
+[https://link-to-build/](https://link-to-build/)
+
+---
+
+## 2. One-click Jetson Setup (Recommended)
+
+The repo contains a Jetson configuration script `sparrow_setup.sh` that installs prerequisites, prepares folders, downloads default Triton models, seeds the DS3231 RTC, configures Wi-Fi hotspot, and launches the SPARROW services.
+
+To send data to the SPARROW dashboard you will need to pair it with your account.  
+To create an account and obtain an access key visit:  
 [https://dashboard.sparrow-earth.com/](https://dashboard.sparrow-earth.com/)
 
-**Script:** `setup_jetson.sh`
+**Script:** Download the SPARROW setup script from this repo once the hardware assembly and Jetson flash is complete (detailed instructions can be found in the build instructions).  
+The setup script should be run from `~/Desktop`.
 
 ### Usage
 
 ```bash
+cd ~/Desktop
 sudo chmod +x sparrow_setup.sh
 sudo ./sparrow_setup.sh
-```
 
----
+```
 
 ## What the Script Does
 
@@ -102,7 +128,7 @@ Creates `~/Desktop/system` with:
 Downloads three default ONNX models from Zenodo and writes minimal `config.pbtxt` for each Triton repo.
 
 ### 8. Access Key
-Prompts for the server access key and writes it to:
+Prompts for the server access key (obtained from the SPARROW dashboard) and writes it to:
 ```
 sparrow/config/access_key.txt
 starlink/config/access_key.txt
@@ -114,7 +140,7 @@ Gets UTC from WorldClock API (fallback: NTP or system UTC) and writes it to the 
 ### 10. Wi-Fi Hotspot
 Configures a persistent hotspot via NetworkManager:  
 **SSID:** `CameraTraps`  
-**Password:** `<to_be_configured>`
+**Password:** `User prompted`
 
 ### 11. Docker Build & Launch
 Builds images with BuildKit (no cache), runs `docker-compose up -d`, and tails logs.
@@ -133,7 +159,7 @@ All Python dependencies are inside the containers (no host Python required):
 
 # API References
 
-The client calls these endpoints on `SERVER_BASE_URL` (**all POST**):
+The client calls these endpoints on `SERVER_BASE_URL`:
 
 | Endpoint | Description |
 |-----------|--------------|
