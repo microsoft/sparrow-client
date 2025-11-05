@@ -454,8 +454,7 @@ def gather_system_metrics():
         "network_received": psutil.net_io_counters().bytes_recv,
         "uptime_seconds": int(time.time() - psutil.boot_time()),
     }
-
-    # Sensor reads must never explode the whole job
+    
     try:
         env = read_env(bus, SENSOR_STATE)
         metrics["temperature_celsius"]        = env.get("t_c")
