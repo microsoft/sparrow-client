@@ -11,7 +11,7 @@ jobs:
       BUNDLE_NAME: sparrow-client-update.tar.gz
       CLIENT_FOLDER: ${{ github.workspace }}
       SCRIPT_FOLDER: ${{ github.workspace }}/update_scripts
-      STAGING_FOLDER: ${{ runner.temp }}/sparrow-update-staging
+      STAGING_FOLDER: ${{ github.workspace }}/sparrow-update-staging
 
     steps:
       - name: Checkout repository
