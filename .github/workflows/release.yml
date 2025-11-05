@@ -20,12 +20,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Determine release version 
         id: version
         run: |
           chmod +x "${SCRIPT_FOLDER}/get_version.sh"
           "${SCRIPT_FOLDER}/get_version.sh"
+
+      - name: Determine previous release tag
+        id: previous
+        run: |
+          set -euo pipefail
+          previous=""
+          while IFS= read -r tag; do
+            if [[ "${tag}" != "${GITHUB_REF_NAME}" ]]; then
+              previous="${tag}"
+              break
+            fi
+          done < <(git tag --sort=-creatordate "release/*" || true)
+          echo "previous-tag=${previous}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate manifest.json
         run: |
@@ -58,4 +73,5 @@ jobs:
           artifactErrorsFailBuild: true
           allowUpdates: true
           generateReleaseNotes: true
+          generateReleaseNotesPreviousTag: ${{ steps.previous.outputs.previous-tag }}
           prerelease: ${{ contains(steps.version.outputs.release-version, '-alpha') || contains(steps.version.outputs.release-version, '-beta') }}
