@@ -14,7 +14,7 @@ jobs:
     env:
       BUNDLE_NAME: sparrow-client-update.tar.gz
       CLIENT_FOLDER: ${{ github.workspace }}
-      SCRIPT_FOLDER: ${{ github.workspace }}/update_scripts
+      SCRIPT_FOLDER: ${{ github.workspace }}/github_scripts/release_workflow
       STAGING_FOLDER: ${{ github.workspace }}/sparrow-update-staging
 
     steps:
@@ -24,23 +24,8 @@ jobs:
       - name: Determine release version
         id: version
         run: |
-          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
-            echo "Workflow expected to run on tag push but received: ${GITHUB_REF_TYPE}" >&2
-            exit 1
-          fi
-          tag="${GITHUB_REF_NAME}"
-          prefix="release/"
-          if [[ "${tag}" == ${prefix}* ]]; then
-            version="${tag#${prefix}}"
-          else
-            version="${tag}"
-          fi
-          if [[ -z "${version}" ]]; then
-            echo "Unable to derive release version from tag name." >&2
-            exit 1
-          fi
-          echo "release-version=${version}" >> "${GITHUB_OUTPUT}"
-          echo "RELEASE_VERSION=${version}" >> "${GITHUB_ENV}"
+          chmod +x "${SCRIPT_FOLDER}/get_version.sh"
+          "${SCRIPT_FOLDER}/get_version.sh"
 
       - name: Generate manifest.json
         run: |
@@ -49,7 +34,7 @@ jobs:
         env:
           SPARROW_DIR: ${{ env.CLIENT_FOLDER }}
 
-      - name: Prepare update files
+      - name: Copy required folders into staging
         run: |
           rm -rf "${STAGING_FOLDER}"
           mkdir -p "${STAGING_FOLDER}"
@@ -57,7 +42,7 @@ jobs:
           rsync -a "${CLIENT_FOLDER}/sparrow/" "${STAGING_FOLDER}/sparrow/"
           rsync -a "${CLIENT_FOLDER}/starlink/" "${STAGING_FOLDER}/starlink/"
 
-      - name: Archive staged update files
+      - name: Archive staged files
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/artifacts"
           tar -czf "${GITHUB_WORKSPACE}/artifacts/${BUNDLE_NAME}" \
