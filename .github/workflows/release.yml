@@ -21,7 +21,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
-      - name: Determine release version
+      - name: Determine release version 
         id: version
         run: |
           chmod +x "${SCRIPT_FOLDER}/get_version.sh"
@@ -57,3 +57,4 @@ jobs:
           artifactErrorsFailBuild: true
           allowUpdates: true
           generateReleaseNotes: true
+          prerelease: ${{ contains(steps.version.outputs.release-version, '-alpha') || contains(steps.version.outputs.release-version, '-beta') }}
