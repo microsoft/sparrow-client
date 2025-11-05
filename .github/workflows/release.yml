@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags: ["release/*"]
+
+jobs:
+  generate-manifest:
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_NAME: sparrow-client-update.tar.gz
+      CLIENT_FOLDER: ${{ github.workspace }}
+      SCRIPT_FOLDER: ${{ github.workspace }}/update_scripts
+      STAGING_FOLDER: ${{ runner.temp }}/sparrow-update-staging
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Determine release version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "Workflow expected to run on tag push but received: ${GITHUB_REF_TYPE}" >&2
+            exit 1
+          fi
+          tag="${GITHUB_REF_NAME}"
+          prefix="release/"
+          if [[ "${tag}" == ${prefix}* ]]; then
+            version="${tag#${prefix}}"
+          else
+            version="${tag}"
+          fi
+          if [[ -z "${version}" ]]; then
+            echo "Unable to derive release version from tag name." >&2
+            exit 1
+          fi
+          echo "release-version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "RELEASE_VERSION=${version}" >> "${GITHUB_ENV}"
+
+      - name: Generate manifest.json
+        run: |
+          chmod +x "${SCRIPT_FOLDER}/generate_manifest.sh"
+          "${SCRIPT_FOLDER}/generate_manifest.sh"
+        env:
+          SPARROW_DIR: ${{ env.CLIENT_FOLDER }}
+
+      - name: Prepare update files
+        run: |
+          rm -rf "${STAGING_FOLDER}"
+          mkdir -p "${STAGING_FOLDER}"
+          cp "${CLIENT_FOLDER}/manifest.json" "${STAGING_FOLDER}/"
+          rsync -a "${CLIENT_FOLDER}/sparrow/" "${STAGING_FOLDER}/sparrow/"
+          rsync -a "${CLIENT_FOLDER}/starlink/" "${STAGING_FOLDER}/starlink/"
+
+      - name: Archive staged update files
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/artifacts"
+          tar -czf "${GITHUB_WORKSPACE}/artifacts/${BUNDLE_NAME}" \
+            -C "${STAGING_FOLDER}" .
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.version.outputs.release-version }}
+          name: Release ${{ steps.version.outputs.release-version }}
+          artifacts: artifacts/${{ env.BUNDLE_NAME }}
+          artifactErrorsFailBuild: true
+          allowUpdates: true
+          generateReleaseNotes: true
