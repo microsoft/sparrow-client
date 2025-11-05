@@ -54,8 +54,8 @@ jobs:
           tag: ${{ steps.version.outputs.release-version }}
           name: Release ${{ steps.version.outputs.release-version }}
           artifacts: artifacts/${{ env.BUNDLE_NAME }}
+          commit: ${{ github.sha }}
           artifactErrorsFailBuild: true
           allowUpdates: true
           generateReleaseNotes: true
           prerelease: ${{ contains(steps.version.outputs.release-version, '-alpha') || contains(steps.version.outputs.release-version, '-beta') }}
-          branch: ${{ steps.version.outputs.release-branch }}
