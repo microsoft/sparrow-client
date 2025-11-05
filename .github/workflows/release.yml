@@ -39,7 +39,7 @@ jobs:
               previous="${tag}"
               break
             fi
-          done < <(git tag --sort=-creatordate "release/*" || true)
+          done < <(git tag --list "release/*" --sort=-creatordate || true)
           echo "previous-tag=${previous}" >> "${GITHUB_OUTPUT}"
 
       - name: Generate manifest.json
