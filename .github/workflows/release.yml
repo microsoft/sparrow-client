@@ -9,7 +9,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  generate-manifest:
+  create-release:
     runs-on: ubuntu-latest
     env:
       BUNDLE_NAME: sparrow-client-update.tar.gz
