@@ -58,3 +58,4 @@ jobs:
           allowUpdates: true
           generateReleaseNotes: true
           prerelease: ${{ contains(steps.version.outputs.release-version, '-alpha') || contains(steps.version.outputs.release-version, '-beta') }}
+          branch: ${{ steps.version.outputs.release-branch }}

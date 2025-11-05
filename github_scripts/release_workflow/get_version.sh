@@ -20,5 +20,26 @@ if [[ -z "${version}" ]]; then
     exit 1
 fi
 
+release_branch=""
+git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
+release_branch=$(git for-each-ref --format='%(refname:strip=3)' --contains "${GITHUB_SHA}" "refs/remotes/origin/release/*" | head -n 1 || true)
+
+if [[ -z "${release_branch}" ]]; then
+    release_branch=$(git for-each-ref --format='%(refname:strip=3)' --contains "${GITHUB_SHA}" "refs/remotes/origin" | head -n 1 || true)
+fi
+
+if [[ -z "${release_branch}" ]]; then
+    if [[ -n "${GITHUB_EVENT_PATH:-}" && -s "${GITHUB_EVENT_PATH}" ]]; then
+        default_branch=$(jq -r '.repository.default_branch // empty' "${GITHUB_EVENT_PATH}" 2>/dev/null || echo "")
+        if [[ -n "${default_branch}" ]]; then
+            release_branch="${default_branch}"
+        fi
+    fi
+fi
+
+if [[ -z "${release_branch}" ]]; then
+    release_branch="main"
+fi
+
 echo "release-version=${version}" >> "${GITHUB_OUTPUT}"
-echo "RELEASE_VERSION=${version}" >> "${GITHUB_ENV}"
+echo "release-branch=${release_branch}" >> "${GITHUB_OUTPUT}"
