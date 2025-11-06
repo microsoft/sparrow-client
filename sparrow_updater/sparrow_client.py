@@ -18,12 +18,14 @@ import subprocess
 import time
 import json
 import logging
+import tarfile
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from github import Github
+from github.GithubException import GithubException
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from urllib.parse import quote
 
 # Paths
 SYSTEM_ROOT = Path(os.path.expanduser(os.getenv("SYSTEM_ROOT", "~/Desktop/system")))
@@ -41,7 +43,9 @@ BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
 
 CACHE_DIR = Path(os.path.expanduser("~/.cache/sparrow_updater"))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
-MANIFEST_CACHE_PATH = CACHE_DIR / "manifest_cache.json"
+CURRENT_VERSION_PATH = CACHE_DIR / "current_version.txt"
+BUNDLE_CACHE_DIR = CACHE_DIR / "bundles"
+BUNDLE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Optional config file that we hot-reload
 ENV_FILE_PATH = LIVE_ROOT / "sparrow_updater.env"
@@ -61,20 +65,22 @@ logger = logging.getLogger("update_agent")
 DEFAULT_ENV_CONTENT = """# Sparrow Updater defaults (auto-generated)
 # You can edit this file; the updater hot-reloads it each cycle.
 
-# Where the manifest.json lives
-MANIFEST_URL=https://sparrowworld.ddns.net/static/updates/manifest.json
-# Base URL for individual files
-REMOTE_BASE_URL=https://sparrowworld.ddns.net/static/updates
 # Where the client reports update results
 CLIENT_UPDATE_URL=https://server.sparrow-earth.com/client_update
 
 # Updater behavior
 DISABLE_UPDATES=false
 POLL_INTERVAL_SECONDS=600
-MAX_FILE_SIZE_BYTES=209715200
 
 # Project root (set to /system for your layout)
 SYSTEM_ROOT=/system
+
+# GitHub release configuration
+GITHUB_REPOSITORY=microsoft/sparrow-client
+RELEASE_BUNDLE_NAME=sparrow-client-update.tar.gz
+# Optional PAT for private repos or higher rate limits
+GITHUB_TOKEN=
+MAX_BUNDLE_SIZE_BYTES=209715200
 """
 
 def ensure_default_env():
@@ -118,15 +124,16 @@ SESSION = build_session()
 
 # CONFIG (hot-reloaded)
 class Config:
-    MANIFEST_URL: str = "https://sparrowworld.ddns.net/static/updates/manifest.json"
-    REMOTE_BASE_URL: str = "https://sparrowworld.ddns.net/static/updates"
-    CLIENT_UPDATE_URL: str = "https://sparrowworld.ddns.net:8080/client_update"
+    CLIENT_UPDATE_URL: str = "https://server.sparrow-earth.com/client_update"
 
     DISABLE_UPDATES: bool = False
     POLL_INTERVAL_SECONDS: int = 600
     CONNECT_TIMEOUT_SECONDS: int = 10
     READ_TIMEOUT_SECONDS: int = 60
-    MAX_FILE_SIZE_BYTES: int = 200 * 1024 * 1024  # 200MiB
+    MAX_BUNDLE_SIZE_BYTES: int = 200 * 1024 * 1024
+    GITHUB_REPOSITORY: str = "microsoft/sparrow-client"
+    RELEASE_BUNDLE_NAME: str = "sparrow-client-update.tar.gz"
+    GITHUB_TOKEN: Optional[str] = None
 
     _env_mtime: Optional[float] = None
 
@@ -136,15 +143,18 @@ class Config:
         return v.strip().lower() in ("1", "true", "yes", "on")
 
     def _from_env_vars(self):
-        self.MANIFEST_URL      = os.getenv("MANIFEST_URL", self.MANIFEST_URL)
-        self.REMOTE_BASE_URL   = os.getenv("REMOTE_BASE_URL", self.REMOTE_BASE_URL)
         self.CLIENT_UPDATE_URL = os.getenv("CLIENT_UPDATE_URL", self.CLIENT_UPDATE_URL)
 
         self.DISABLE_UPDATES = self._parse_bool(os.getenv("DISABLE_UPDATES"), self.DISABLE_UPDATES)
         self.POLL_INTERVAL_SECONDS   = int(os.getenv("POLL_INTERVAL_SECONDS", self.POLL_INTERVAL_SECONDS))
         self.CONNECT_TIMEOUT_SECONDS = int(os.getenv("CONNECT_TIMEOUT_SECONDS", self.CONNECT_TIMEOUT_SECONDS))
         self.READ_TIMEOUT_SECONDS    = int(os.getenv("READ_TIMEOUT_SECONDS", self.READ_TIMEOUT_SECONDS))
-        self.MAX_FILE_SIZE_BYTES     = int(os.getenv("MAX_FILE_SIZE_BYTES", self.MAX_FILE_SIZE_BYTES))
+        self.MAX_BUNDLE_SIZE_BYTES   = int(os.getenv("MAX_BUNDLE_SIZE_BYTES", self.MAX_BUNDLE_SIZE_BYTES))
+        self.GITHUB_REPOSITORY       = os.getenv("GITHUB_REPOSITORY", self.GITHUB_REPOSITORY)
+        self.RELEASE_BUNDLE_NAME     = os.getenv("RELEASE_BUNDLE_NAME", self.RELEASE_BUNDLE_NAME)
+        token_override = os.getenv("GITHUB_TOKEN")
+        if token_override is not None:
+            self.GITHUB_TOKEN = token_override
 
     def _from_env_file(self):
         if not ENV_FILE_PATH.exists():
@@ -163,8 +173,6 @@ class Config:
             k, v = line.split("=", 1)
             kv[k.strip()] = v.strip()
 
-        self.MANIFEST_URL      = kv.get("MANIFEST_URL", self.MANIFEST_URL)
-        self.REMOTE_BASE_URL   = kv.get("REMOTE_BASE_URL", self.REMOTE_BASE_URL)
         self.CLIENT_UPDATE_URL = kv.get("CLIENT_UPDATE_URL", self.CLIENT_UPDATE_URL)
 
         if "DISABLE_UPDATES" in kv:
@@ -173,16 +181,20 @@ class Config:
         self.POLL_INTERVAL_SECONDS   = int(kv.get("POLL_INTERVAL_SECONDS", self.POLL_INTERVAL_SECONDS))
         self.CONNECT_TIMEOUT_SECONDS = int(kv.get("CONNECT_TIMEOUT_SECONDS", self.CONNECT_TIMEOUT_SECONDS))
         self.READ_TIMEOUT_SECONDS    = int(kv.get("READ_TIMEOUT_SECONDS", self.READ_TIMEOUT_SECONDS))
-        self.MAX_FILE_SIZE_BYTES     = int(kv.get("MAX_FILE_SIZE_BYTES", self.MAX_FILE_SIZE_BYTES))
+        self.MAX_BUNDLE_SIZE_BYTES   = int(kv.get("MAX_BUNDLE_SIZE_BYTES", self.MAX_BUNDLE_SIZE_BYTES))
+        self.GITHUB_REPOSITORY       = kv.get("GITHUB_REPOSITORY", self.GITHUB_REPOSITORY)
+        self.RELEASE_BUNDLE_NAME     = kv.get("RELEASE_BUNDLE_NAME", self.RELEASE_BUNDLE_NAME)
+        if "GITHUB_TOKEN" in kv:
+            self.GITHUB_TOKEN = kv["GITHUB_TOKEN"]
 
     def _require_https(self, url: str, name: str):
         if not url.lower().startswith("https://"):
             raise RuntimeError(f"{name} must be HTTPS: {url}")
 
     def validate(self):
-        self._require_https(self.MANIFEST_URL, "MANIFEST_URL")
-        self._require_https(self.REMOTE_BASE_URL, "REMOTE_BASE_URL")
         self._require_https(self.CLIENT_UPDATE_URL, "CLIENT_UPDATE_URL")
+        if "/" not in self.GITHUB_REPOSITORY:
+            raise RuntimeError("GITHUB_REPOSITORY must be in 'owner/name' format")
 
     def load(self, first_load=False) -> bool:
         before = self.to_dict()
@@ -209,14 +221,15 @@ class Config:
 
     def to_dict(self) -> dict:
         return {
-            "MANIFEST_URL": self.MANIFEST_URL,
-            "REMOTE_BASE_URL": self.REMOTE_BASE_URL,
             "CLIENT_UPDATE_URL": self.CLIENT_UPDATE_URL,
             "DISABLE_UPDATES": self.DISABLE_UPDATES,
             "POLL_INTERVAL_SECONDS": self.POLL_INTERVAL_SECONDS,
             "CONNECT_TIMEOUT_SECONDS": self.CONNECT_TIMEOUT_SECONDS,
             "READ_TIMEOUT_SECONDS": self.READ_TIMEOUT_SECONDS,
-            "MAX_FILE_SIZE_BYTES": self.MAX_FILE_SIZE_BYTES,
+            "MAX_BUNDLE_SIZE_BYTES": self.MAX_BUNDLE_SIZE_BYTES,
+            "GITHUB_REPOSITORY": self.GITHUB_REPOSITORY,
+            "RELEASE_BUNDLE_NAME": self.RELEASE_BUNDLE_NAME,
+            "GITHUB_TOKEN_SET": bool(self.GITHUB_TOKEN),
         }
 
 ensure_default_env()
@@ -230,23 +243,6 @@ def sha256_of_file(path: str) -> str:
         for chunk in iter(lambda: f.read(4096), b""):
             h.update(chunk)
     return h.hexdigest()
-
-def _load_manifest_cache():
-    if MANIFEST_CACHE_PATH.exists():
-        try:
-            return json.loads(MANIFEST_CACHE_PATH.read_text(encoding="utf-8"))
-        except Exception:
-            logger.warning("Failed to read manifest cache; ignoring.")
-    return {"etag": None, "last_modified": None, "body": None}
-
-def _save_manifest_cache(etag: Optional[str], last_modified: Optional[str], body: Optional[str]):
-    try:
-        MANIFEST_CACHE_PATH.write_text(
-            json.dumps({"etag": etag, "last_modified": last_modified, "body": body}, ensure_ascii=False),
-            encoding="utf-8",
-        )
-    except Exception as e:
-        logger.warning("Failed to write manifest cache: %s", e)
 
 def _safe_join(base: Path, rel: str) -> Path:
     rel = _strip_dot_slash(rel)
@@ -264,6 +260,203 @@ def ensure_space(required_bytes: int, base: Path, buffer_bytes: int = 200*1024*1
     if required_bytes and free < required_bytes + buffer_bytes:
         raise RuntimeError(f"Not enough disk space: need {required_bytes + buffer_bytes}B, have {free}B")
 
+# FETCH & DOWNLOAD ---------------------------------------------------------
+def _bounded_stream_to_file(resp: requests.Response, dest_path: Path, max_bytes: Optional[int]) -> None:
+    content_length = resp.headers.get("Content-Length")
+    if max_bytes is not None and content_length is not None:
+        try:
+            clen = int(content_length)
+            if clen > max_bytes:
+                raise ValueError(f"Remote file too large: {clen} > {max_bytes}")
+        except ValueError:
+            pass
+
+    bytes_written = 0
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(dest_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8192):
+            if not chunk:
+                continue
+            bytes_written += len(chunk)
+            if max_bytes is not None and bytes_written > max_bytes:
+                raise ValueError(f"Download exceeded cap: {bytes_written} > {max_bytes}")
+            f.write(chunk)
+        f.flush()
+        os.fsync(f.fileno())
+
+def _copy_bundle_file(bundle_root: Path, relpath: str, target_path: Path) -> None:
+    source = _safe_join(bundle_root, relpath)
+    if not source.exists():
+        raise FileNotFoundError(f"Bundle missing file {relpath}")
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target_path)
+    with open(target_path, "rb+") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+
+# Release discovery helpers -------------------------------------------------
+def normalize_version_tag(tag: Optional[str]) -> str:
+    if not tag:
+        return "0.0.0"
+    value = str(tag).strip()
+    if value.lower().startswith("refs/tags/"):
+        value = value[10:]
+    if value.lower().startswith("release/"):
+        value = value.split("/", 1)[1]
+    if value.startswith("v") or value.startswith("V"):
+        value = value[1:]
+    return value or "0.0.0"
+
+def _version_key(value: str) -> Tuple[Tuple[int, ...], int, str]:
+    normalized = normalize_version_tag(value)
+    base, _, suffix = normalized.partition("-")
+    parts: List[int] = []
+    for part in base.split("."):
+        try:
+            parts.append(int(part))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    suffix = suffix.lower()
+    suffix_flag = 1 if not suffix else 0
+    return tuple(parts), suffix_flag, suffix
+
+def is_remote_version_newer(remote: str, local: str) -> bool:
+    return _version_key(remote) > _version_key(local)
+
+def read_current_version() -> str:
+    try:
+        value = CURRENT_VERSION_PATH.read_text(encoding="utf-8").strip()
+        return value or "0.0.0"
+    except FileNotFoundError:
+        return "0.0.0"
+    except Exception as exc:
+        logger.warning("Failed to read %s: %s", CURRENT_VERSION_PATH, exc)
+        return "0.0.0"
+
+def write_current_version(version: str) -> None:
+    try:
+        CURRENT_VERSION_PATH.write_text(version.strip(), encoding="utf-8")
+    except Exception as exc:
+        logger.warning("Failed to persist current version to %s: %s", CURRENT_VERSION_PATH, exc)
+
+def _build_github_client() -> Github:
+    token = (CFG.GITHUB_TOKEN or "").strip()
+    if token:
+        return Github(token, per_page=100)
+    return Github(per_page=100)
+
+def _latest_published_release():
+    try:
+        client = _build_github_client()
+        repo = client.get_repo(CFG.GITHUB_REPOSITORY)
+        for release in repo.get_releases():
+            if not release.draft:
+                return release
+        logger.info("No published releases found for %s", CFG.GITHUB_REPOSITORY)
+    except GithubException as exc:
+        logger.error("GitHub API error while fetching releases: %s", exc)
+    except Exception:
+        logger.exception("Unexpected error while retrieving GitHub release metadata.")
+    return None
+
+def _find_bundle_asset(release) -> Optional[object]:
+    try:
+        for asset in release.get_assets():
+            if asset.name == CFG.RELEASE_BUNDLE_NAME:
+                return asset
+    except GithubException as exc:
+        logger.error("GitHub API error while listing assets: %s", exc)
+    return None
+
+def _safe_extract_tar(tar_obj: tarfile.TarFile, target_dir: Path) -> None:
+    base = target_dir.resolve()
+    for member in tar_obj.getmembers():
+        member_path = (base / member.name).resolve()
+        if not str(member_path).startswith(str(base)):
+            raise RuntimeError(f"Unsafe path in archive: {member.name}")
+    tar_obj.extractall(path=str(base))
+
+def _download_release_bundle(asset, version: str) -> Path:
+    sanitized_version = normalize_version_tag(version).replace("/", "-")
+    bundle_path = BUNDLE_CACHE_DIR / f"{sanitized_version}-{asset.name}"
+    headers = {"Accept": "application/octet-stream"}
+    token = (CFG.GITHUB_TOKEN or "").strip()
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    if bundle_path.exists():
+        bundle_path.unlink()
+
+    logger.info("Downloading release bundle %s for version %s", asset.name, version)
+    with SESSION.get(asset.browser_download_url, stream=True, headers=headers, timeout=CFG.TOTAL_TIMEOUT) as resp:
+        resp.raise_for_status()
+        _bounded_stream_to_file(resp, bundle_path, CFG.MAX_BUNDLE_SIZE_BYTES)
+    return bundle_path
+
+def _load_manifest_from_release(release, version: str) -> Tuple[dict, Path]:
+    asset = _find_bundle_asset(release)
+    if asset is None:
+        raise RuntimeError(
+            f"Release {release.tag_name} is missing required asset {CFG.RELEASE_BUNDLE_NAME}"
+        )
+
+    sanitized_version = normalize_version_tag(version).replace("/", "-") or "0.0.0"
+    extract_dir = BUNDLE_CACHE_DIR / sanitized_version
+    manifest_path = extract_dir / "manifest.json"
+
+    if not manifest_path.exists():
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        bundle_path = _download_release_bundle(asset, version)
+        with tarfile.open(bundle_path, "r:gz") as tar_obj:
+            _safe_extract_tar(tar_obj, extract_dir)
+
+    if not manifest_path.exists():
+        raise RuntimeError("Manifest not found in release bundle after extraction.")
+
+    try:
+        manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to parse manifest from release bundle: {exc}") from exc
+    return manifest_data, extract_dir
+
+def fetch_release_manifest(local_version: str) -> Optional[Dict[str, Any]]:
+    release = _latest_published_release()
+    if release is None:
+        return None
+
+    remote_version = normalize_version_tag(release.tag_name or release.name or release.title)
+    if not remote_version:
+        remote_version = "0.0.0"
+
+    if not is_remote_version_newer(remote_version, local_version):
+        logger.info(
+            "Client already at latest release (local=%s, remote=%s)",
+            local_version,
+            remote_version,
+        )
+        return {"version": remote_version, "manifest": None}
+
+    try:
+        manifest, bundle_root = _load_manifest_from_release(release, remote_version)
+    except Exception as exc:
+        logger.error("Failed to prepare manifest from release %s: %s", remote_version, exc)
+        return None
+
+    logger.info(
+        "Latest release %s requires update (local=%s)",
+        remote_version,
+        local_version,
+    )
+    return {
+        "version": remote_version,
+        "manifest": manifest,
+        "bundle_root": bundle_root,
+    }
+
 # DOCKER COMPOSE detection (v2 "docker compose" vs v1 "docker-compose")
 def _compose_cmd() -> List[str]:
     candidates = [
@@ -280,75 +473,25 @@ def _compose_cmd() -> List[str]:
 
 COMPOSE = _compose_cmd()
 
-# FETCH & DOWNLOAD
-def fetch_manifest() -> dict:
-    cache = _load_manifest_cache()
-    headers: Dict[str, str] = {}
-    if cache.get("etag"):
-        headers["If-None-Match"] = cache["etag"]
-    if cache.get("last_modified"):
-        headers["If-Modified-Since"] = cache["last_modified"]
-
-    resp = SESSION.get(CFG.MANIFEST_URL, headers=headers, timeout=CFG.TOTAL_TIMEOUT)
-    if resp.status_code == 304:
-        logger.info("Manifest not modified (304). Using cached copy.")
-        if not cache.get("body"):
-            raise RuntimeError("304 Not Modified but no cached manifest available.")
-        text = cache["body"]
-    else:
-        resp.raise_for_status()
-        text = resp.text.replace("\r", "")
-        _save_manifest_cache(resp.headers.get("ETag"), resp.headers.get("Last-Modified"), text)
-
-    return json.loads(text)
-
-def _bounded_stream_to_file(resp: requests.Response, dest_path: Path, max_bytes: int) -> None:
-    content_length = resp.headers.get("Content-Length")
-    if content_length is not None:
-        try:
-            clen = int(content_length)
-            if clen > max_bytes:
-                raise ValueError(f"Remote file too large: {clen} > {max_bytes}")
-        except ValueError:
-            pass
-    bytes_written = 0
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(dest_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=8192):
-            if not chunk:
-                continue
-            bytes_written += len(chunk)
-            if bytes_written > max_bytes:
-                raise ValueError(f"Download exceeded cap: {bytes_written} > {max_bytes}")
-            f.write(chunk)
-        f.flush()
-        os.fsync(f.fileno())
-
-def build_remote_url(relpath: str) -> str:
-    rel = _strip_dot_slash(relpath)
-    return CFG.REMOTE_BASE_URL.rstrip("/") + "/" + quote(rel, safe="/")
-
-def download_to_path(relpath: str, target_path: Path) -> None:
-    url = build_remote_url(relpath)
-    with SESSION.get(url, stream=True, timeout=CFG.TOTAL_TIMEOUT) as r:
-        r.raise_for_status()
-        _bounded_stream_to_file(r, target_path, CFG.MAX_FILE_SIZE_BYTES)
-
 # STAGING -> BACKUP -> APPLY -> RESTART -> ROLLBACK
 def make_release_id(version: str) -> str:
     return f"{version}-{time.strftime('%Y-%m-%dT%H-%M-%SZ', time.gmtime())}"
 
-def stage_files(release_id: str, files_to_update: List[Dict[str, Optional[str]]]) -> Path:
+def stage_files(
+    release_id: str,
+    files_to_update: List[Dict[str, Any]],
+    bundle_root: Path,
+) -> Path:
     stage_dir = RELEASES_DIR / release_id
     stage_dir.mkdir(parents=True, exist_ok=False)
     logger.info("Staging into %s", stage_dir)
 
     for item in files_to_update:
-        relpath = item["rel"]
+        relpath = str(item["rel"])
         expected_sha = item["sha256"]
         dst = _safe_join(stage_dir, relpath)
         tmp = dst.with_suffix(dst.suffix + ".tmp")
-        download_to_path(relpath, tmp)
+        _copy_bundle_file(bundle_root, relpath, tmp)
         actual = sha256_of_file(str(tmp))
         if actual.lower() != str(expected_sha).lower():
             raise RuntimeError(f"Checksum mismatch for {relpath}: expected {expected_sha}, got {actual}")
@@ -359,14 +502,16 @@ def stage_files(release_id: str, files_to_update: List[Dict[str, Optional[str]]]
         os.replace(tmp, dst)
     return stage_dir
 
-def backup_current_files(release_id: str,
-                         files_to_update: List[Dict[str, Optional[str]]]) -> Path:
+def backup_current_files(
+    release_id: str,
+    files_to_update: List[Dict[str, Any]],
+) -> Path:
     backup_dir = BACKUPS_DIR / release_id
     backup_dir.mkdir(parents=True, exist_ok=False)
     logger.info("Backing up current files to %s", backup_dir)
 
     for item in files_to_update:
-        relpath = item["rel"]
+        relpath = str(item["rel"])
         src = _safe_join(LIVE_ROOT, relpath)
         dst = _safe_join(backup_dir, relpath)
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -377,9 +522,9 @@ def backup_current_files(release_id: str,
 
     return backup_dir
 
-def apply_stage_to_live(stage_dir: Path, files_to_update: List[Dict[str, Optional[str]]]) -> None:
+def apply_stage_to_live(stage_dir: Path, files_to_update: List[Dict[str, Any]]) -> None:
     for item in files_to_update:
-        relpath = item["rel"]
+        relpath = str(item["rel"])
         mode = item.get("mode")
         src = _safe_join(stage_dir, relpath)
         dest = _safe_join(LIVE_ROOT, relpath)
@@ -399,9 +544,9 @@ def apply_stage_to_live(stage_dir: Path, files_to_update: List[Dict[str, Optiona
             except Exception:
                 logger.warning("Failed to chmod %s to %s", dest, mode)
 
-def restore_backup(backup_dir: Path, files_to_update: List[Dict[str, Optional[str]]]) -> None:
+def restore_backup(backup_dir: Path, files_to_update: List[Dict[str, Any]]) -> None:
     for item in files_to_update:
-        relpath = item["rel"]
+        relpath = str(item["rel"])
         bsrc = _safe_join(backup_dir, relpath)
         missing_marker = bsrc.parent / (Path(relpath).name + ".__MISSING__")
         dest = _safe_join(LIVE_ROOT, relpath)
@@ -498,10 +643,64 @@ def main_loop():
 
             logger.info("Checking for updates...")
 
-            full_manifest = fetch_manifest()
-            version   = full_manifest.get("version", "1.0.0")
+            local_version = read_current_version()
+            release_payload = fetch_release_manifest(local_version)
+            if release_payload is None:
+                logger.warning(
+                    "Unable to retrieve release information; retrying in %ds.",
+                    CFG.POLL_INTERVAL_SECONDS,
+                )
+                time.sleep(CFG.POLL_INTERVAL_SECONDS)
+                continue
+
+            remote_version = release_payload["version"]
+            manifest = release_payload.get("manifest")
+            bundle_root_raw = release_payload.get("bundle_root")
+            if manifest is None:
+                logger.info(
+                    "Client already at latest release (local=%s, remote=%s). "
+                    "Sleeping %ds.",
+                    local_version,
+                    remote_version,
+                    CFG.POLL_INTERVAL_SECONDS,
+                )
+                time.sleep(CFG.POLL_INTERVAL_SECONDS)
+                continue
+
+            if bundle_root_raw is None:
+                logger.error(
+                    "Release payload missing bundle root; retrying in %ds.",
+                    CFG.POLL_INTERVAL_SECONDS,
+                )
+                time.sleep(CFG.POLL_INTERVAL_SECONDS)
+                continue
+
+            bundle_root = Path(bundle_root_raw)
+
+            if not isinstance(manifest, dict):
+                logger.error(
+                    "Release manifest payload is invalid; retrying in %ds.",
+                    CFG.POLL_INTERVAL_SECONDS,
+                )
+                time.sleep(CFG.POLL_INTERVAL_SECONDS)
+                continue
+
+            full_manifest = manifest
+            manifest_version_raw = str(
+                full_manifest.get("version", remote_version)
+            )
+            normalized_version = normalize_version_tag(
+                manifest_version_raw or remote_version
+            )
+            version_for_reporting = manifest_version_raw or remote_version
             changelog = full_manifest.get("changelog", [])
             raw_files = full_manifest.get("files", {})
+
+            logger.info(
+                "Preparing update for release %s (local=%s)",
+                normalized_version,
+                local_version,
+            )
 
             # Normalize to { rel: {sha256,size,mode} }
             normalized: Dict[str, Dict[str, Optional[str]]] = {}
@@ -519,8 +718,14 @@ def main_loop():
                 if not meta["sha256"]:
                     continue
                 normalized[rel] = meta
-                if isinstance(meta["size"], int):
-                    total_bytes += meta["size"]
+                size_value = meta.get("size")
+                if isinstance(size_value, int):
+                    total_bytes += size_value
+                else:
+                    try:
+                        total_bytes += _safe_join(bundle_root, rel).stat().st_size
+                    except FileNotFoundError:
+                        logger.warning("Bundle missing size info for %s", rel)
 
             remote_files = normalized
 
@@ -536,14 +741,24 @@ def main_loop():
             to_update: List[Dict[str, Optional[str]]] = []
             for relpath, meta in remote_files.items():
                 local_path = _safe_join(LIVE_ROOT, relpath)
-                local_sha = sha256_of_file(str(local_path)) if os.path.exists(local_path) else None
+                local_sha = (
+                    sha256_of_file(str(local_path))
+                    if os.path.exists(local_path)
+                    else None
+                )
                 remote_sha = meta["sha256"]
                 if local_sha is None or local_sha.lower() != str(remote_sha).lower():
                     to_update.append({"rel": relpath, **meta})
 
             # Nothing to do?
             if not to_update:
-                logger.info("No updates found. Next check in %d seconds.", CFG.POLL_INTERVAL_SECONDS)
+                logger.info(
+                    "No file differences detected for release %s. "
+                    "Recording version and sleeping %ds.",
+                    normalized_version,
+                    CFG.POLL_INTERVAL_SECONDS,
+                )
+                write_current_version(normalized_version)
                 time.sleep(CFG.POLL_INTERVAL_SECONDS)
                 continue
 
@@ -551,11 +766,11 @@ def main_loop():
             for item in to_update:
                 logger.info("  → %s", item["rel"])
 
-            release_id = make_release_id(version)
+            release_id = make_release_id(normalized_version)
 
             # Stage changed files
             try:
-                stage_dir = stage_files(release_id, to_update)
+                stage_dir = stage_files(release_id, to_update, bundle_root)
             except Exception as e:
                 logger.exception("Staging failed: %s", e)
                 time.sleep(CFG.POLL_INTERVAL_SECONDS)
@@ -584,9 +799,11 @@ def main_loop():
                 logger.info("Update applied (compose restart succeeded).")
                 report_update_to_server(
                     [str(i["rel"]) for i in to_update],
-                    version, changelog,
+                    version_for_reporting,
+                    changelog,
                     success=True
                 )
+                write_current_version(normalized_version)
                 # Prune old releases/backups (keep last 5)
                 prune_dirs(RELEASES_DIR, keep=5)
                 prune_dirs(BACKUPS_DIR, keep=5)
@@ -600,7 +817,8 @@ def main_loop():
                 finally:
                     report_update_to_server(
                         [str(i["rel"]) for i in to_update],
-                        version, changelog,
+                        version_for_reporting,
+                        changelog,
                         success=False, message=str(e)
                     )
 
