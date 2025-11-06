@@ -185,10 +185,11 @@ def read_solar_generation():
 def append_metric_to_backlog(metric):
     """Append a metrics record to the backlog file as a JSON line."""
     try:
-        backlog_dir = os.path.dirname(metrics_backlog_file)
-        os.makedirs(backlog_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(metrics_backlog_file), exist_ok=True)
+        safe = dict(metric)
+        safe.pop("auth_key", None)
         with open(metrics_backlog_file, "a") as f:
-            f.write(json.dumps(metric) + "\n")
+            f.write(json.dumps(safe) + "\n")
         logger.info("Appended current metric to backlog.")
     except Exception as e:
         logger.error(f"Failed to append metric to backlog: {e}")
@@ -223,7 +224,8 @@ def send_backlog_metrics():
 
         for record in records:
             try:
-                response = requests.post(system_metrics_url, json=record, timeout=10)
+                payload = {**record, "auth_key": auth_key}
+                response = requests.post(system_metrics_url, json=payload, timeout=10)
                 response.raise_for_status()
                 sent_count += 1
             except requests.exceptions.RequestException:
@@ -266,7 +268,8 @@ def upload_image_and_data(image_path, detection_data_list):
                     "confidence": float(detection_data["Confidence Score"]),
                     "date": detection_data["Date"],
                 }
-                logger.info(f"Sending image data to server: {data}")
+                logger.info("Sending image data to server: %s",
+                    {k: v for k, v in data.items() if k != "auth_key"})
                 response = requests.post(image_server_url, files=files, data=data)
                 response.raise_for_status()
         except requests.exceptions.RequestException as e:
@@ -454,7 +457,8 @@ def gather_system_metrics():
         "network_received": psutil.net_io_counters().bytes_recv,
         "uptime_seconds": int(time.time() - psutil.boot_time()),
     }
-    
+
+    # Sensor reads must never explode the whole job
     try:
         env = read_env(bus, SENSOR_STATE)
         metrics["temperature_celsius"]        = env.get("t_c")
@@ -484,7 +488,8 @@ def gather_system_metrics():
     metrics["vedirect_battery_voltage"]   = round(ved_v, 2) if ved_v is not None else None
     metrics["vedirect_load_power_watts"]  = round(ved_load_p, 2) if ved_load_p is not None else None
 
-    logger.info(f"System metrics gathered: {metrics}")
+    logger.info("System metrics gathered: %s",
+            {k: v for k, v in metrics.items() if k != "auth_key"})
     return metrics
 
 def send_system_metrics():
@@ -503,8 +508,9 @@ def send_system_metrics():
         logger.info(f"Successfully sent system metrics: {response.status_code}")
     except requests.exceptions.RequestException as e:
         logger.error(f"Failed to POST system metrics: {e}")
-        append_metric_to_backlog(metrics)
+        append_metric_to_backlog(metrics)  # still have 'metrics' here
     except Exception as e:
+        # If we failed before 'metrics' existed, at least log it clearly
         logger.critical(f"send_system_metrics() unexpected error before POST: {e}", exc_info=True)
 
 
