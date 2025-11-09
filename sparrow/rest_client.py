@@ -282,13 +282,18 @@ def upload_image_and_data(image_path, detection_data_list):
 def upload_audio_file(audio_path):
     """Upload a single .wav file; return True on success."""
     audio_name = os.path.basename(audio_path)
+
+    if not is_server_online(audio_server_url):
+        logger.warning(f"Server appears offline, skipping upload for {audio_name}.")
+        return False
+
     try:
         with open(audio_path, "rb") as audio_file:
             files = {"file": (audio_name, audio_file, "audio/wav")}
             data  = {"auth_key": auth_key, "unique_id": unique_id}
-            response = requests.post(audio_server_url, files=files, data=data)
+            response = requests.post(audio_server_url, files=files, data=data, timeout=30)
             response.raise_for_status()
-    except requests.exceptions.RequestException as e:
+    except (requests.exceptions.RequestException, OSError) as e:
         logger.error(f"Failed to upload audio file {audio_name}: {e}")
         return False
     else:
