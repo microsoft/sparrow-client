@@ -281,7 +281,7 @@ For more information see the [Code of Conduct FAQ](https://opensource.microsoft.
 contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
 
 ---
-
+<!-- This section has the latex citation 
 # :fountain_pen: Cite us!
 We have recently published a technical paper on **SPARROW** and encourage you to cite our work! 
 
@@ -301,9 +301,9 @@ We have recently published a [technical paper on SPARROW](https://aka.ms/sparrow
       archivePrefix={arXiv},
 }
 ```
--->
----
 
+---
+-->
 # ⁉️ SPARROW FAQs
 <details>
 <summary> 🦜 What is SPARROW and what does it do? </summary>
