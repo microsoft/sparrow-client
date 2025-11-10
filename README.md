@@ -25,8 +25,8 @@
 Solar-powered and equipped with advanced sensors, it collects biodiversity data—from camera traps, acoustic monitors, and other environmental detectors—that are processed using our most advanced PyTorch-based wildlife AI models on power efficient edge GPUs. 
 
 The resulting critical information is then transmitted via low-Earth orbit satellites directly to the cloud or on-premise infrastructure, allowing researchers to access fresh, actionable insights in real time, no matter where they are.
-
-To learn more about project SPARROW, please checkout our SPARROW paper here 👉 [aka.ms/sparrowpaper](https://aka.ms/sparrowpaper)
+<!-- This section has the latex citation 
+To learn more about project SPARROW, please checkout our SPARROW paper here 👉 [aka.ms/sparrowpaper](https://aka.ms/sparrowpaper)-->
 
 # ✨ Key Features
 
