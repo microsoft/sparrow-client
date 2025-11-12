@@ -119,8 +119,8 @@ This curated list is designed to simplify the process for beginners and those wi
 
 To download a PDF version of this BOM list, please visit 👉 [aka.ms/sparrowbom](https://aka.ms/sparrowbom)
 
-SPARROW Bill of Materials (BOM) © 2025 by Microsoft is licensed under CC BY 4.0.
-🔗 To view a copy of this license, visit: [CC BY 4.0 License](https://creativecommons.org/licenses/by/4.0/)
+SPARROW Bill of Materials (BOM) © 2025 by Microsoft is licensed under MIT.
+🔗 To view a copy of this license, visit: [MIT License](https://mit-license.org/)
 
 ### ⚠️ Important Note on Alternative I²C Boards
 If you choose to use generic I²C boards, please be aware that some modifications to the device address in the code 🔍 may be necessary. Different vendors often assign addresses that vary from those provided in this release.
@@ -138,8 +138,8 @@ Follow this step-by-step guide to assemble your SPARROW device with ease. We des
 
 To download the SPARROW Hardware Assembly Guide, please visit 👉 [aka.ms/sparrowassembly](https://aka.ms/sparrowassembly)
 
-SPARROW Assembly and Set-Up Guide © 2025 by Microsoft is licensed under CC BY 4.0.
-🔗 To view a copy of this license, visit: [CC BY 4.0 License](https://creativecommons.org/licenses/by/4.0/)
+SPARROW Assembly and Set-Up Guide © 2025 by Microsoft is licensed under MIT.
+🔗 To view a copy of this license, visit: [MIT License](https://mit-license.org/)
 
 ---
 
