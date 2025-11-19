@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 ###############################################################################
-#  SPARROW Setup Script           31-October-2025
+#  SPARROW Setup Script           18-November-2025
 ###############################################################################
 set -euo pipefail
 
@@ -85,6 +85,10 @@ AUDIO_BIRDS_MODEL_FILENAME_FINAL="model.onnx"
 REPO_URL="https://github.com/microsoft/sparrow-client"
 CLONE_DIR=""
 
+ONBOARDING_URL="https://server.sparrow-earth.com/onboarding"
+
+USERNAME=""
+
 ###############################################################################
 # 2.  -- UTILITY FUNCTIONS --
 ###############################################################################
@@ -107,6 +111,34 @@ generate_unique_id() {
     chmod 644 "$UUID_FILE"; chown root:root "$UUID_FILE"
     log "Generated UUID: $NEW_UUID"
 }
+
+get_hardware_id() {
+    if [[ ! -f "$UUID_FILE" ]]; then
+        log "UUID file not found at $UUID_FILE"
+        return 1
+    fi
+
+    local uuid
+    uuid=$(tr -d '\r\n' <"$UUID_FILE")
+
+    if [[ -z "$uuid" ]]; then
+        log "UUID in $UUID_FILE is empty"
+        return 1
+    fi
+
+    local hwid
+    hwid=$(printf '%s' "$uuid" | sha256sum | awk '{print substr($1,1,12)}')
+
+    if [[ -z "$hwid" ]]; then
+        log "Failed to derive hardware id from UUID"
+        return 1
+    fi
+
+    # Log to file, but don't let log()'s stdout leak into command substitution
+    log "Generated Hardware ID for onboarding: $hwid" >/dev/null
+    echo "$hwid"
+}
+
 
 install_curl()  { command_exists curl  || { apt-get update -y; apt-get install -y curl;  } }
 install_wget()  { command_exists wget  || { apt-get update -y; apt-get install -y wget;  } }
@@ -522,7 +554,88 @@ configure_access_key() {
     mkdir -p "$SYSTEM_FOLDER/sparrow/config" "$SYSTEM_FOLDER/starlink/config"
     echo "$k1" >"$SYSTEM_FOLDER/sparrow/config/access_key.txt"
     echo "$k1" >"$SYSTEM_FOLDER/starlink/config/access_key.txt"
+
+    # Prompt for username (in-memory only)
+    while true; do
+        USERNAME=$(_input "Enter Sparrow Username")
+        if [[ -z "$USERNAME" ]]; then
+            _error "Username cannot be empty - try again."
+            continue
+        fi
+        break
+    done
 }
+
+onboard_device() {
+    local max_retries=5
+    local attempt=1
+    local hwid api_key resp status_code body access_key_file json_payload
+
+    access_key_file="$SYSTEM_FOLDER/sparrow/config/access_key.txt"
+
+    if [[ ! -f "$access_key_file" ]]; then
+        log "Access key file not found at $access_key_file"
+        _error "Cannot onboard: access key not found."
+        return 1
+    fi
+
+    # Strip any line endings from the key
+    api_key=$(tr -d '\r\n' <"$access_key_file")
+
+    if [[ -z "$api_key" ]]; then
+        _error "Access key file is empty; cannot onboard."
+        return 1
+    fi
+
+    if [[ -z "$USERNAME" ]]; then
+        _error "Username is not set in memory; cannot onboard."
+        return 1
+    fi
+
+    hwid=$(get_hardware_id) || {
+        _error "Cannot compute hardware id for onboarding."
+        return 1
+    }
+
+    # Build JSON payload safely (no shell interpolation weirdness)
+    json_payload=$(printf '{"unit_id":"%s"}' "$hwid")
+
+    log "Onboarding JSON payload (len=${#json_payload}): $json_payload"
+
+    while (( attempt <= max_retries )); do
+        log "Onboarding attempt $attempt/$max_retries for unit_id=$hwid (username=$USERNAME)"
+
+        resp=$(curl -sS -w "%{http_code}" \
+            -X POST "$ONBOARDING_URL" \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: $api_key" \
+            -H "X-Username: $USERNAME" \
+            --data-binary "$json_payload" 2>/dev/null || true)
+
+        status_code=${resp: -3}
+        body=${resp:: -3}
+
+        if [[ "$status_code" == "200" || "$status_code" == "201" ]]; then
+            log "Onboarding successful: HTTP $status_code, body: $body"
+            _info "Onboarding successful for hardware ID: $hwid"
+            return 0
+        fi
+
+        log "Onboarding failed (HTTP $status_code): $body"
+
+        if ! _yesno "Onboarding failed (HTTP $status_code). Retry?"; then
+            _error "User aborted onboarding."
+            return 1
+        fi
+
+        attempt=$((attempt+1))
+        sleep 2
+    done
+
+    _error "Onboarding failed after $max_retries attempts."
+    return 1
+}
+
 
 ###############################################################################
 # 4.  -- MAIN SCRIPT LOGIC --
@@ -557,6 +670,7 @@ setup_persistent_wifi_hotspot
 install_smbus2
 seed_ds3231
 configure_access_key
+onboard_device || log "Onboarding did not complete successfully; continuing setup."
 
 if _yesno "Install TeamViewer Host (ARM64)?" ; then
     _progress "Installing TeamViewer Host..." bash -c '
