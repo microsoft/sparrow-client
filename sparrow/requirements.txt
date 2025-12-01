@@ -25,3 +25,4 @@ librosa==0.10.2.post1
 numba==0.59.1
 llvmlite==0.42.0
 pyftpdlib==2.1.0
+piexif==1.1.3
