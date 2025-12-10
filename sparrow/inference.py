@@ -526,9 +526,9 @@ while True:
                     print(f"Removed source file {image_path} (all detections filtered)")
                     continue
 
-                # Save CLEAN image, embedding boxes in EXIF if JPEG
+                # Save image: if DRAW_BOXES=True, save annotated image; otherwise save original.
                 out_path = os.path.join(output_dir, image_name)
-                img_to_save = image  # always save original pixels
+                img_to_save = annotated_img if DRAW_BOXES else image
 
                 if image_name.lower().endswith((".jpg", ".jpeg")):
                     save_jpeg_with_boxes(img_to_save, boxes_meta, out_path)
