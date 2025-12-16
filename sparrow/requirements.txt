@@ -6,7 +6,7 @@ charset-normalizer==3.3.2
 certifi==2024.7.4
 schedule==1.2.2
 psutil==6.0.0
-filelock==3.12.0
+filelock==3.20.1
 smbus2==0.4.1
 pyserial==3.5
 tqdm==4.66.5
